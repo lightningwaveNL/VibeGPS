@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>GPS Sports Tracker</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#1e1e1e">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <header>
+        <h1>Tracker Pro</h1>
+        <select id="sport-selector">
+            <option value="Running">Running</option>
+            <option value="Cycling">Cycling</option>
+            <option value="Walking">Walking</option>
+            <option value="Mountainbiking">Mountainbiking</option>
+            <option value="Road cycling">Road Cycling</option>
+            <option value="Dog Walking">Dog Walking</option>
+        </select>
+    </header>
+
+    <main>
+        <section id="dashboard" class="card">
+            <div class="time-display" id="elapsed-time">00:00</div>
+            
+            <div class="metrics-grid">
+                <div class="metric">
+                    <span class="value" id="dist-val">0.00</span>
+                    <span class="label">Distance (km)</span>
+                </div>
+                <div class="metric">
+                    <span class="value" id="cur-speed-val">0.0</span>
+                    <span class="label">Speed (km/h)</span>
+                </div>
+                <div class="metric">
+                    <span class="value" id="avg-speed-val">0.0</span>
+                    <span class="label">Avg Speed (km/h)</span>
+                </div>
+                <div class="metric">
+                    <span class="value" id="roll-speed-val">0.0</span>
+                    <span class="label">1-Min Effort (km/h)</span>
+                </div>
+                <div class="metric">
+                    <span class="value" id="cur-pace-val">0:00</span>
+                    <span class="label">Pace (min/km)</span>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button id="start-btn" class="btn primary">Start</button>
+                <button id="stop-btn" class="btn danger hidden">Stop & Save</button>
+            </div>
+        </section>
+
+        <section id="history" class="card">
+            <h2>Session History</h2>
+            <div id="history-list">
+                </div>
+        </section>
+    </main>
+
+    <script src="app.js"></script>
+</body>
+</html>
