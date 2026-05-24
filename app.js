@@ -1,13 +1,8 @@
 // --- 1. Basic 1D Kalman Filter for Graph Smoothing ---
 class KalmanFilter {
     constructor({ R = 0.01, Q = 3, A = 1, B = 0, C = 1 } = {}) {
-        this.R = R; // Noise power
-        this.Q = Q; // System dynamics variance
-        this.A = A;
-        this.B = B;
-        this.C = C;
-        this.cov = NaN;
-        this.x = NaN; // Estimated signal
+        this.R = R; this.Q = Q; this.A = A; this.B = B; this.C = C;
+        this.cov = NaN; this.x = NaN; 
     }
     filter(z) {
         if (isNaN(this.x)) {
@@ -35,20 +30,15 @@ function initDB() {
         request.onupgradeneeded = (e) => {
             db = e.target.result;
             if (!db.objectStoreNames.contains('sessions')) {
-                // Stores historical completed sessions
                 db.createObjectStore('sessions', { keyPath: 'id' });
             }
         };
-        request.onsuccess = (e) => {
-            db = e.target.result;
-            resolve(db);
-        };
+        request.onsuccess = (e) => { db = e.target.result; resolve(db); };
         request.onerror = (e) => reject(e.target.error);
     });
 }
 
 // --- 3. Math & Geography Utilities ---
-// Haversine formula to calculate distance between two lat/lon points in km
 function haversine(lat1, lon1, lat2, lon2) {
     const R = 6371; 
     const dLat = (lat2 - lat1) * Math.PI / 180;
@@ -57,7 +47,7 @@ function haversine(lat1, lon1, lat2, lon2) {
               Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
               Math.sin(dLon / 2) * Math.sin(dLon / 2);
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
+    return R * c; // Distance in km
 }
 
 function formatTime(ms) {
@@ -78,17 +68,25 @@ function formatPace(speedKmh) {
 // --- 4. Main Application Logic ---
 let watchId = null;
 let wakeLock = null;
+let uiInterval = null;
+
+// Pause & Time variables
+let isPaused = false;
+let pauseStartTime = 0;
+let totalPausedTime = 0;
+let skipNextDistance = false;
+
 let currentSession = {
     id: null,
     sport: '',
     startTime: null,
-    points: [], // Array of { lat, lon, alt, speed, timestamp }
+    points: [], 
     totalDistance: 0
 };
-let uiInterval = null;
 
 const UI = {
     startBtn: document.getElementById('start-btn'),
+    pauseBtn: document.getElementById('pause-btn'),
     stopBtn: document.getElementById('stop-btn'),
     time: document.getElementById('elapsed-time'),
     dist: document.getElementById('dist-val'),
@@ -96,19 +94,17 @@ const UI = {
     avgSpeed: document.getElementById('avg-speed-val'),
     rollSpeed: document.getElementById('roll-speed-val'),
     curPace: document.getElementById('cur-pace-val'),
+    avgPace: document.getElementById('avg-pace-val'), // New UI element
     sportSelect: document.getElementById('sport-selector'),
-    historyList: document.getElementById('history-list')
+    historyList: document.getElementById('history-list'),
+    gpsDot: document.getElementById('gps-dot'),
+    gpsText: document.getElementById('gps-text')
 };
 
-// Request Screen Wake Lock
 async function requestWakeLock() {
     try {
-        if ('wakeLock' in navigator) {
-            wakeLock = await navigator.wakeLock.request('screen');
-        }
-    } catch (err) {
-        console.warn('Wake Lock error:', err);
-    }
+        if ('wakeLock' in navigator) wakeLock = await navigator.wakeLock.request('screen');
+    } catch (err) { console.warn('Wake Lock error:', err); }
 }
 
 // Start Tracking
@@ -120,45 +116,85 @@ UI.startBtn.addEventListener('click', async () => {
         points: [],
         totalDistance: 0
     };
+    
+    // Reset pause trackers
+    isPaused = false;
+    totalPausedTime = 0;
+    skipNextDistance = false;
 
     await requestWakeLock();
     
     UI.startBtn.classList.add('hidden');
+    UI.pauseBtn.classList.remove('hidden');
     UI.stopBtn.classList.remove('hidden');
     UI.sportSelect.disabled = true;
 
-    // Start GPS Watch
     watchId = navigator.geolocation.watchPosition(
         handleNewPosition,
         (err) => console.error('GPS Error:', err),
         { enableHighAccuracy: true, maximumAge: 0 }
     );
 
-    // Update Timer UI every second
     uiInterval = setInterval(updateTimer, 1000);
 });
 
+// Pause Tracking
+UI.pauseBtn.addEventListener('click', () => {
+    if (!isPaused) {
+        // Trigger Pause
+        isPaused = true;
+        pauseStartTime = Date.now();
+        UI.pauseBtn.textContent = "Resume";
+        UI.pauseBtn.classList.replace('warning', 'primary');
+        UI.gpsText.textContent = "Paused";
+        UI.gpsDot.className = 'dot yellow';
+    } else {
+        // Trigger Resume
+        isPaused = false;
+        totalPausedTime += (Date.now() - pauseStartTime);
+        skipNextDistance = true; // Prevent huge distance jump calculation
+        UI.pauseBtn.textContent = "Pause";
+        UI.pauseBtn.classList.replace('primary', 'warning');
+    }
+});
+
 function handleNewPosition(pos) {
+    // Update GPS Status UI based on accuracy (measured in meters)
+    const accuracy = pos.coords.accuracy;
+    if (!isPaused) {
+        if (accuracy < 15) {
+            UI.gpsDot.className = 'dot green'; UI.gpsText.textContent = `GPS Excellent (${Math.round(accuracy)}m)`;
+        } else if (accuracy < 50) {
+            UI.gpsDot.className = 'dot yellow'; UI.gpsText.textContent = `GPS Fair (${Math.round(accuracy)}m)`;
+        } else {
+            UI.gpsDot.className = 'dot red'; UI.gpsText.textContent = `GPS Poor (${Math.round(accuracy)}m)`;
+        }
+    }
+
+    // Ignore adding points if we are currently paused
+    if (isPaused) return;
+
     const { latitude, longitude, altitude, speed } = pos.coords;
     const timestamp = pos.timestamp;
-    
-    // Convert m/s to km/h (fallback to 0 if null)
     let curSpeedKmh = (speed || 0) * 3.6;
 
     const newPoint = { lat: latitude, lon: longitude, alt: altitude || 0, speed: curSpeedKmh, ts: timestamp };
     
-    // Add distance if not first point
     if (currentSession.points.length > 0) {
         const lastPoint = currentSession.points[currentSession.points.length - 1];
-        const dist = haversine(lastPoint.lat, lastPoint.lon, newPoint.lat, newPoint.lon);
-        currentSession.totalDistance += dist;
         
-        // If device doesn't provide speed, calculate it manually from distance/time
-        if (speed === null) {
-            const timeDiffSec = (newPoint.ts - lastPoint.ts) / 1000;
-            curSpeedKmh = timeDiffSec > 0 ? (dist / (timeDiffSec / 3600)) : 0;
-            newPoint.speed = curSpeedKmh;
+        // Calculate distance unless we just unpaused (to avoid straight-line jumping)
+        if (!skipNextDistance) {
+            const dist = haversine(lastPoint.lat, lastPoint.lon, newPoint.lat, newPoint.lon);
+            currentSession.totalDistance += dist;
+            
+            if (speed === null) {
+                const timeDiffSec = (newPoint.ts - lastPoint.ts) / 1000;
+                curSpeedKmh = timeDiffSec > 0 ? (dist / (timeDiffSec / 3600)) : 0;
+                newPoint.speed = curSpeedKmh;
+            }
         }
+        skipNextDistance = false; 
     }
 
     currentSession.points.push(newPoint);
@@ -166,8 +202,9 @@ function handleNewPosition(pos) {
 }
 
 function updateTimer() {
-    const elapsed = Date.now() - currentSession.startTime;
-    UI.time.textContent = formatTime(elapsed);
+    if (isPaused) return; // Freeze timer UI on pause
+    const activeElapsed = Date.now() - currentSession.startTime - totalPausedTime;
+    UI.time.textContent = formatTime(activeElapsed);
 }
 
 function updateMetrics(curSpeedKmh) {
@@ -175,10 +212,14 @@ function updateMetrics(curSpeedKmh) {
     UI.curSpeed.textContent = curSpeedKmh.toFixed(1);
     UI.curPace.textContent = formatPace(curSpeedKmh);
 
-    // Average Speed (Total dist / Total time)
-    const elapsedHrs = (Date.now() - currentSession.startTime) / 3600000;
-    const avgSpeed = elapsedHrs > 0 ? (currentSession.totalDistance / elapsedHrs) : 0;
+    // Active time in hours for accurate averages
+    const activeTimeMs = Date.now() - currentSession.startTime - totalPausedTime;
+    const activeTimeHrs = activeTimeMs / 3600000;
+    
+    // Average Speed & Pace
+    const avgSpeed = activeTimeHrs > 0 ? (currentSession.totalDistance / activeTimeHrs) : 0;
     UI.avgSpeed.textContent = avgSpeed.toFixed(1);
+    UI.avgPace.textContent = formatPace(avgSpeed);
 
     // 1-Minute Rolling Average
     const oneMinAgo = Date.now() - 60000;
@@ -187,7 +228,6 @@ function updateMetrics(curSpeedKmh) {
     if (recentPoints.length > 1) {
         const first = recentPoints[0];
         const last = recentPoints[recentPoints.length - 1];
-        // Dist over last 60 seconds
         let rollDist = 0;
         for(let i=1; i < recentPoints.length; i++) {
             rollDist += haversine(recentPoints[i-1].lat, recentPoints[i-1].lon, recentPoints[i].lat, recentPoints[i].lon);
@@ -207,8 +247,11 @@ UI.stopBtn.addEventListener('click', () => {
     if (wakeLock) { wakeLock.release(); wakeLock = null; }
     
     UI.startBtn.classList.remove('hidden');
+    UI.pauseBtn.classList.add('hidden');
     UI.stopBtn.classList.add('hidden');
     UI.sportSelect.disabled = false;
+    UI.gpsText.textContent = "Waiting for GPS...";
+    UI.gpsDot.className = 'dot red';
 
     if (currentSession.points.length > 0) {
         saveSessionToDB(currentSession);
@@ -228,13 +271,15 @@ function renderHistory() {
     const request = tx.objectStore('sessions').getAll();
     
     request.onsuccess = (e) => {
-        const sessions = e.target.result.reverse(); // Newest first
+        const sessions = e.target.result.reverse(); 
         sessions.forEach(session => {
             const el = document.createElement('div');
             el.className = 'history-item';
             
-            const duration = session.points.length > 1 ? 
+            // Total logged duration
+            const durationMs = session.points.length > 1 ? 
                 (session.points[session.points.length-1].ts - session.points[0].ts) : 0;
+            const finalAvgSpeed = durationMs > 0 ? (session.totalDistance / (durationMs/3600000)) : 0;
 
             el.innerHTML = `
                 <div class="history-header" onclick="toggleDetails(${session.id})">
@@ -242,7 +287,7 @@ function renderHistory() {
                     <span>${session.totalDistance.toFixed(2)} km</span>
                 </div>
                 <div class="history-details" id="details-${session.id}">
-                    <p>Time: ${formatTime(duration)} | Avg Speed: ${(session.totalDistance / (duration/3600000)).toFixed(1)} km/h</p>
+                    <p>Time: ${formatTime(durationMs)} | Avg Pace: ${formatPace(finalAvgSpeed)} min/km</p>
                     <div class="chart-container">
                         <canvas id="chart-${session.id}"></canvas>
                     </div>
@@ -258,12 +303,9 @@ function renderHistory() {
     };
 }
 
-// Toggle Dropdown and Render Smooth Kalman Graph
 window.toggleDetails = function(id) {
     const details = document.getElementById(`details-${id}`);
     const isActive = details.classList.contains('active');
-    
-    // Close others
     document.querySelectorAll('.history-details').forEach(el => el.classList.remove('active'));
     
     if (!isActive) {
@@ -280,45 +322,26 @@ function renderChart(id) {
         if (!session || session.points.length === 0) return;
 
         const ctx = document.getElementById(`chart-${id}`).getContext('2d');
-        
-        // Extract raw speed
         const rawSpeeds = session.points.map(p => p.speed);
-        const labels = session.points.map((p, i) => i); // simple index for X axis
+        const labels = session.points.map((p, i) => i); 
 
-        // Apply Kalman Filter for smooth graph
+        // Apply Kalman Filter
         const kalman = new KalmanFilter();
         const smoothedSpeeds = rawSpeeds.map(v => kalman.filter(v));
 
-        // Destroy previous chart instance if exists
-        if(window[`chartInstance_${id}`]) {
-            window[`chartInstance_${id}`].destroy();
-        }
+        if(window[`chartInstance_${id}`]) { window[`chartInstance_${id}`].destroy(); }
 
         window[`chartInstance_${id}`] = new Chart(ctx, {
             type: 'line',
             data: {
                 labels: labels,
                 datasets: [
-                    {
-                        label: 'Raw Speed',
-                        data: rawSpeeds,
-                        borderColor: 'rgba(255,255,255,0.2)',
-                        borderWidth: 1,
-                        pointRadius: 0
-                    },
-                    {
-                        label: 'Smoothed Speed (Kalman)',
-                        data: smoothedSpeeds,
-                        borderColor: '#bb86fc',
-                        borderWidth: 2,
-                        tension: 0.4, // bezier curve tension
-                        pointRadius: 0
-                    }
+                    { label: 'Raw Speed', data: rawSpeeds, borderColor: 'rgba(255,255,255,0.2)', borderWidth: 1, pointRadius: 0 },
+                    { label: 'Smoothed Speed (Kalman)', data: smoothedSpeeds, borderColor: '#bb86fc', borderWidth: 2, tension: 0.4, pointRadius: 0 }
                 ]
             },
             options: {
-                responsive: true,
-                maintainAspectRatio: false,
+                responsive: true, maintainAspectRatio: false,
                 scales: { x: { display: false }, y: { beginAtZero: true } },
                 plugins: { legend: { display: true, labels: { color: '#fff' } } }
             }
@@ -341,27 +364,19 @@ window.exportData = function(id, format) {
         let content, mime, ext;
 
         if (format === 'gpx') {
-            content = generateGPX(session);
-            mime = 'application/gpx+xml';
-            ext = '.gpx';
+            content = generateGPX(session); mime = 'application/gpx+xml'; ext = '.gpx';
         } else {
-            content = generateKML(session);
-            mime = 'application/vnd.google-earth.kml+xml';
-            ext = '.kml';
+            content = generateKML(session); mime = 'application/vnd.google-earth.kml+xml'; ext = '.kml';
         }
 
         const filename = `Session_${session.id}_${session.sport}${ext}`;
         const file = new File([content], filename, { type: mime });
 
-        // Web Share API fallback mechanism
         if (navigator.canShare && navigator.canShare({ files: [file] })) {
             try {
-                await navigator.share({
-                    title: `My ${session.sport} Session`,
-                    files: [file]
-                });
+                await navigator.share({ title: `My ${session.sport} Session`, files: [file] });
             } catch (err) {
-                console.log('Share cancelled or failed, falling back to download.', err);
+                console.log('Share cancelled, falling back to download.', err);
                 triggerDownload(file);
             }
         } else {
@@ -373,11 +388,8 @@ window.exportData = function(id, format) {
 function triggerDownload(file) {
     const url = URL.createObjectURL(file);
     const a = document.createElement('a');
-    a.href = url;
-    a.download = file.name;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    a.href = url; a.download = file.name;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
     URL.revokeObjectURL(url);
 }
 
@@ -385,46 +397,28 @@ function triggerDownload(file) {
 function generateGPX(session) {
     let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <gpx version="1.1" creator="SportsTracker PWA">
-  <trk>
-    <name>${session.sport} Session</name>
-    <trkseg>\n`;
+  <trk><name>${session.sport} Session</name><trkseg>\n`;
     session.points.forEach(p => {
-        xml += `      <trkpt lat="${p.lat}" lon="${p.lon}">
-        <ele>${p.alt}</ele>
-        <time>${new Date(p.ts).toISOString()}</time>
-      </trkpt>\n`;
+        xml += `      <trkpt lat="${p.lat}" lon="${p.lon}"><ele>${p.alt}</ele><time>${new Date(p.ts).toISOString()}</time></trkpt>\n`;
     });
-    xml += `    </trkseg>
-  </trk>
-</gpx>`;
+    xml += `    </trkseg></trk></gpx>`;
     return xml;
 }
 
 function generateKML(session) {
     let xml = `<?xml version="1.0" encoding="UTF-8"?>
 <kml xmlns="http://www.opengis.net/kml/2.2">
-  <Document>
-    <name>${session.sport} Session</name>
-    <Placemark>
-      <LineString>
-        <coordinates>\n`;
+  <Document><name>${session.sport} Session</name><Placemark><LineString><coordinates>\n`;
     session.points.forEach(p => {
         xml += `          ${p.lon},${p.lat},${p.alt}\n`;
     });
-    xml += `        </coordinates>
-      </LineString>
-    </Placemark>
-  </Document>
-</kml>`;
+    xml += `        </coordinates></LineString></Placemark></Document></kml>`;
     return xml;
 }
 
 // Init App
-initDB().then(() => {
-    renderHistory();
-}).catch(console.error);
+initDB().then(() => renderHistory()).catch(console.error);
 
-// Register Service Worker
 if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('service-worker.js');
 }

@@ -24,6 +24,11 @@
 
     <main>
         <section id="dashboard" class="card">
+            <div id="gps-status" class="status-indicator">
+                <span id="gps-dot" class="dot red"></span>
+                <span id="gps-text">Waiting for GPS...</span>
+            </div>
+
             <div class="time-display" id="elapsed-time">00:00</div>
             
             <div class="metrics-grid">
@@ -47,10 +52,15 @@
                     <span class="value" id="cur-pace-val">0:00</span>
                     <span class="label">Pace (min/km)</span>
                 </div>
+                <div class="metric">
+                    <span class="value" id="avg-pace-val">0:00</span>
+                    <span class="label">Avg Pace (min/km)</span>
+                </div>
             </div>
 
             <div class="controls">
                 <button id="start-btn" class="btn primary">Start</button>
+                <button id="pause-btn" class="btn warning hidden">Pause</button>
                 <button id="stop-btn" class="btn danger hidden">Stop & Save</button>
             </div>
         </section>
